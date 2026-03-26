@@ -18,7 +18,7 @@ The project emphasizes realistic offensive attack chaining—moving from externa
 The environment consists of an attacker machine and a vulnerable server operating on a shared, isolated Nutanix AHV subnet. 
 
 <p align="center">
-  <img src=".assets/Architecture Diagram.png" alt="Architecture Diagram and Attack Flow" width="850"/>
+  <img src=".assets/Architecture%20Diagram.png" alt="Architecture Diagram and Attack Flow" width="850"/>
   <br>
   <b>Figure 1: Attack Architecture and Exploitation Flow</b>
 </p>
@@ -30,19 +30,21 @@ The diagram above illustrates the relationship between the attacker and the expo
 
 ## Phase 1: Environment Setup & Connectivity Verification
 
-Before initiating the offensive attack chain, baseline network connectivity was established and verified to ensure the isolated lab environment was routing traffic correctly. 
+Before initiating the offensive attack chain, baseline network connectivity was established and verified. This ensures the isolated lab environment is routing traffic correctly, which is a critical prerequisite for advanced exploitation techniques like reverse shells.
 
 ### Network Validation
-The Metasploitable2 victim machine was instructed to execute outbound `ping` commands. This verified two critical routing paths: connectivity to the local attacker machine (Kali Linux) and connectivity to the external internet (Google). Verifying this routing is essential for ensuring the environment is properly configured for the subsequent exploitation phases.
+The Metasploitable2 victim machine was instructed to execute outbound `ping` commands. The first test verified local routing by successfully pinging the attacker's Kali Linux machine. This guarantees that if a payload is executed on the target, it has a valid network path to call back to the attacker.
 
 <p align="center">
-  <img src=".assets/Metasploitable VM - Kali IP ping.png" alt="Ping to Attacker Machine" width="750"/>
+  <img src=".assets/Metasploitable%20VM%20-%20Kali%20IP%20ping.png" alt="Ping to Attacker Machine" width="750"/>
   <br>
   <b>Figure 2: Validation of Outbound Connectivity to Attacker Machine</b>
 </p>
 
+The second test verified external routing by successfully pinging Google's DNS servers. This confirms that the compromised machine could be used to exfiltrate data to the external internet or reach out to external Command and Control (C2) infrastructure.
+
 <p align="center">
-  <img src=".assets/Metasploitable VM - Google ping.png" alt="Ping to External Network" width="750"/>
+  <img src=".assets/Metasploitable%20VM%20-%20Google%20ping.png" alt="Ping to External Network" width="750"/>
   <br>
   <b>Figure 3: Validation of Outbound Connectivity to External Network</b>
 </p>
@@ -54,10 +56,10 @@ The Metasploitable2 victim machine was instructed to execute outbound `ping` com
 With network routing confirmed, the active attack chain initiates with comprehensive network and service enumeration to identify potential entry points on the target system.
 
 ### Service Enumeration
-A full port scan was executed against the target using Nmap (`nmap -p- -sV 44.67.49.35`), revealing multiple exposed services including HTTP (Port 80), FTP (Port 21 running vsFTPd 2.3.4), SSH (Port 22), and Samba (Ports 139/445). 
+A full port scan was executed against the target using Nmap (`nmap -p- -sV 44.67.49.35`). The scan successfully mapped the attack surface, revealing multiple exposed services including HTTP (Port 80), FTP (Port 21 running vsFTPd 2.3.4), SSH (Port 22), and Samba (Ports 139/445). This enumeration directly dictated the exploitation strategy for Phase 3.
 
 <p align="center">
-  <img src=".assets/Nmap full port scan.png" alt="Nmap Full Port Scan" width="750"/>
+  <img src=".assets/Nmap%20full%20port%20scan.png" alt="Nmap Full Port Scan" width="750"/>
   <br>
   <b>Figure 4: Nmap Service Enumeration Results</b>
 </p>
@@ -68,54 +70,57 @@ A full port scan was executed against the target using Nmap (`nmap -p- -sV 44.67
 
 ## Phase 3: System-Level Compromise & RCE
 
-Following reconnaissance, the attacker escalates to achieve Remote Code Execution (RCE) at the OS level using the vulnerable daemons discovered during the initial Nmap scan.
+Following reconnaissance, the attacker immediately targets the highly privileged, vulnerable OS-level daemons discovered during the Nmap scan to achieve Remote Code Execution (RCE) and root access.
 
 ### 1. VNC Authentication Bypass
-Using the `vncviewer` tool on the attacker machine, a connection attempt was made to the VNC service (port 5900) on the target server. **Figure 5 evidences that this connection was established without any authentication prompt**, demonstrating a critical misconfiguration.
-
-Following this manual bypass verification, Metasploit's `auxiliary/scanner/vnc/vnc_login` module was used. **Figure 6 illustrates the execution and output of this scanner command**, which confirmed that the "blank" password state makes the VNC service susceptible to unauthorized access and potential control.
+The attacker first targeted the VNC service (port 5900). Using the `vncviewer` tool on the attacker machine, a direct connection attempt was made. The connection was established instantly without an authentication prompt, granting a remote desktop view of the server and exposing a critical security misconfiguration.
 
 <p align="center">
-  <img src=".assets/Metasploit - VNC viewer.png" alt="VNC Viewer Connection" width="750"/>
+  <img src=".assets/Metasploit%20-%20VNC%20viewer.png" alt="VNC Viewer Connection" width="750"/>
   <br>
   <b>Figure 5: Initial Unauthenticated VNC Connection Attempt</b>
 </p>
 
+To systematically validate this finding, Metasploit's `auxiliary/scanner/vnc/vnc_login` module was utilized. The scanner output explicitly confirmed the presence of a "blank" password state, allowing programmatic, unauthorized access to the VNC protocol.
+
 <p align="center">
-  <img src=".assets/Metasploitable - VNC exploit.png" alt="Metasploit VNC Login Scanner" width="750"/>
+  <img src=".assets/Metasploitable%20-%20VNC%20exploit.png" alt="Metasploit VNC Login Scanner" width="750"/>
   <br>
   <b>Figure 6: VNC Login Vulnerability Verified via Metasploit</b>
 </p>
 
 * **MITRE ATT&CK Mapping:** `T1021.002 - Remote Services: VNC`
 
-### 2. vsFTPd & Samba Exploitation
-The FTP service was subjected to a credential stuffing attack. Using the `hydra` tool, a dictionary attack was performed on the `msfadmin` account. **As shown in Figure 7**, the command quickly identified the valid credentials as `msfadmin:msfadmin`, revealing a weak password policy.
-
-Using Metasploit, the attacker then targeted the vulnerable FTP service using the `exploit/unix/ftp/vsftpd_234_backdoor` module. **Figure 8 demonstrates the execution of this exploit command**, which successfully deployed the backdoor, establishing a root command shell listening on port 6200. To confirm privilege level, the `whoami` command was run. **As evidenced in Figure 9, the command returned `root`, confirming absolute system takeover.**
-
-Alternatively, the `exploit/multi/samba/usermap_script` module was deployed against the SMB service. **Figure 10 illustrates the successful execution of this exploit command**, showing Metasploit establishing a secondary remote command execution (RCE) session directly into the target system via a vulnerable username map script.
+### 2. vsFTPd Exploitation & Root Escalation
+Shifting focus to the FTP service, the attacker conducted a credential stuffing attack. Using the `hydra` network logon cracker, a dictionary attack was launched against the `msfadmin` account. The tool rapidly identified the valid credentials as `msfadmin:msfadmin`, highlighting a severe failure in the target's password complexity policy.
 
 <p align="center">
-  <img src=".assets/Metasploitable - vsFTPd password analysis.png" alt="Hydra FTP Password Analysis" width="800"/>
+  <img src=".assets/Metasploitable%20-%20vsFTPd%20password%20analysis.png" alt="Hydra FTP Password Analysis" width="800"/>
   <br>
   <b>Figure 7: Successful Dictionary Attack Against FTP Service</b>
 </p>
 
+Knowing the FTP daemon version (`vsFTPd 2.3.4`) was outdated, the attacker utilized Metasploit's `exploit/unix/ftp/vsftpd_234_backdoor` module. Executing this exploit successfully triggered the malicious backdoor embedded in that specific software version, establishing a listening command shell on port 6200.
+
 <p align="center">
-  <img src=".assets/Metasploitable - vsFTPd backdoor.png" alt="Metasploit vsFTPd Backdoor Exploit" width="750"/>
+  <img src=".assets/Metasploitable%20-%20vsFTPd%20backdoor.png" alt="Metasploit vsFTPd Backdoor Exploit" width="750"/>
   <br>
   <b>Figure 8: Execution of the vsFTPd Backdoor Exploit</b>
 </p>
 
+With the shell established, the attacker needed to verify the current context and privilege level of the compromised session. Executing the `whoami` command returned `root`, verifying that the vsFTPd backdoor granted absolute, unrestricted administrative takeover of the operating system.
+
 <p align="center">
-  <img src=".assets/Metasploitable - Root access proof.png" alt="Root Access Confirmed" width="750"/>
+  <img src=".assets/Metasploitable%20-%20Root%20access%20proof.png" alt="Root Access Confirmed" width="750"/>
   <br>
   <b>Figure 9: Confirmation of Root Shell Privileges via whoami</b>
 </p>
 
+### 3. Alternative Vector: Samba Exploitation
+To demonstrate persistence and alternative entry points, the attacker targeted the SMB service. By deploying the `exploit/multi/samba/usermap_script` module, a secondary Remote Code Execution (RCE) session was successfully established directly into the target system, proving that the server was vulnerable from multiple independent vectors.
+
 <p align="center">
-  <img src=".assets/Metasploitable - Samba exploit .png" alt="Samba Usermap Exploit" width="750"/>
+  <img src=".assets/Metasploitable%20-%20Samba%20exploit%20.png" alt="Samba Usermap Exploit" width="750"/>
   <br>
   <b>Figure 10: Alternative RCE Achieved via Samba Vulnerability</b>
 </p>
@@ -126,21 +131,21 @@ Alternatively, the `exploit/multi/samba/usermap_script` module was deployed agai
 
 ## Phase 4: Application Layer Exploitation (DVWA)
 
-With system-level compromise demonstrated, the focus shifted to exploiting the web application layer (Damn Vulnerable Web App) running on port 80 to demonstrate data exfiltration and session hijacking.
+Even with system-level compromise achieved, the attacker pivoted to exploit the web application layer (Damn Vulnerable Web App) on port 80. This demonstrates the ability to directly extract backend user data and hijack active web sessions.
 
 ### 1. SQL Injection (SQLi) & Data Extraction
-Authentication bypass was initiated using the standard `' OR '1'='1` payload. To escalate the attack, a `UNION SELECT` statement was injected into the vulnerable input field. **As shown in Figure 11**, this command forced the database to reveal its internal schema, successfully enumerating hidden tables like `users` and `user_permissions`. 
-
-Following this, a targeted extraction query was executed. **Figure 12 demonstrates the result of this command**, displaying the exfiltrated user accounts (e.g., admin, Gordon Brown) and their corresponding password hashes directly within the web application's interface.
+Authentication bypass was initiated using a standard `' OR '1'='1` SQL injection payload. To escalate the attack, a `UNION SELECT` statement was injected into the vulnerable input field. This forced the database to reveal its internal architecture, successfully enumerating highly sensitive tables such as `users` and `user_permissions`.
 
 <p align="center">
-  <img src=".assets/SQL Injection - Table Enumeration.png" alt="SQL Injection Table Enumeration" width="800"/>
+  <img src=".assets/SQL%20Injection%20-%20Table%20Enumeration.png" alt="SQL Injection Table Enumeration" width="800"/>
   <br>
   <b>Figure 11: UNION-based SQLi Database Enumeration</b>
 </p>
 
+Following the schema discovery, a targeted data extraction query was executed. This command forced the application to print the contents of the `users` table, successfully exfiltrating usernames (e.g., admin, Gordon Brown) and their corresponding password hashes directly to the attacker's screen.
+
 <p align="center">
-  <img src=".assets/SQL Injection - Data Extraction.png" alt="SQL Injection Data Extraction" width="800"/>
+  <img src=".assets/SQL%20Injection%20-%20Data%20Extraction.png" alt="SQL Injection Data Extraction" width="800"/>
   <br>
   <b>Figure 12: Data Exfiltration via SQL Injection</b>
 </p>
@@ -148,18 +153,18 @@ Following this, a targeted extraction query was executed. **Figure 12 demonstrat
 * **MITRE ATT&CK Mapping:** `T1190 - Exploit Public-Facing Application`
 
 ### 2. Cross-Site Scripting (XSS) & Session Hijacking
-In parallel, a reflected Cross-Site Scripting (XSS) vulnerability was exploited by injecting a malicious JavaScript payload (`<script>alert(document.cookie)</script>`). **Figure 13 captures the execution of this payload**, which triggers a browser alert revealing the active `PHPSESSID` cookie. 
-
-By intercepting the browser's web requests and manually swapping the current unauthenticated session cookie with the stolen `PHPSESSID`, the attacker bypassed the login screen entirely. **Figure 14 shows the exact result of this session hijacking**, granting immediate administrative access to the DVWA application without requiring a password.
+In parallel, the attacker exploited a reflected Cross-Site Scripting (XSS) vulnerability. By injecting a malicious JavaScript payload (`<script>alert(document.cookie)</script>`), the application executed the script within the browser's context. This triggered a pop-up alert that successfully exposed the victim's active `PHPSESSID` session cookie.
 
 <p align="center">
-  <img src=".assets/XSS - Cookie Theft.png" alt="XSS Cookie Theft" width="800"/>
+  <img src=".assets/XSS%20-%20Cookie%20Theft.png" alt="XSS Cookie Theft" width="800"/>
   <br>
   <b>Figure 13: XSS Payload Executing Cookie Theft</b>
 </p>
 
+Armed with the stolen `PHPSESSID`, the attacker intercepted their own browser requests and manually injected the compromised cookie. This technique bypassed the login screen entirely, forcing the server to recognize the attacker as an authenticated user and granting immediate administrative access to the DVWA portal.
+
 <p align="center">
-  <img src=".assets/XSS - Session Hijack .png" alt="Session Hijacking" width="800"/>
+  <img src=".assets/XSS%20-%20Session%20Hijack%20.png" alt="Session Hijacking" width="800"/>
   <br>
   <b>Figure 14: Successful Session Impersonation via PHPSESSID</b>
 </p>
